@@ -10,14 +10,14 @@ To get real data, check out the free [Country & ASN database](https://ipinfo.io/
 
 ## Features
 
-- Automatically infer table schema from MMDB file
+- Automatically infers the table schema from the MMDB file
 - Supports nested records by flattening them
-- Store data in a partitioned table to keep track of history
-- Create an IP trie dictionary for fast lookups
+- Stores data in a partitioned table to keep track of history
+- Creates an IP trie dictionary for fast lookups
 
 ## Current limitations
 
-- Schema is inferred from the first record only. If subsequent records have additional fields, those will be ignored.
+- The schema is inferred from the first record only. If subsequent records have additional fields, those will be ignored.
 - The `network` and `partition` names are reserved and must not be present in the MMDB file
 
 ## Installation
