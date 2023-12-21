@@ -42,3 +42,4 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^Update README.md"
