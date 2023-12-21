@@ -35,7 +35,7 @@ docker run --rm -it ghcr.io/maxmouchet/mmdb-to-clickhouse -h
 ## Example usage
 
 
-First start a ClickHouse instance and open a client REPL:
+First start a ClickHouse instance:
 ```bash
 docker run --name clickhouse --rm -d -p 9000:9000 clickhouse/clickhouse-server
 ```
