@@ -148,6 +148,7 @@ func main() {
 	if *test {
 		query = fmt.Sprintf("SELECT dictGet('%s', '%s', IPv6StringToNum('1.1.1.1'))", dictName, schema[1].Name)
 		log.Printf("Running test query: %s", query)
+		log.Printf("This may take some time as the dictionnary gets loaded in memory")
 		var val string
 		err = conn.QueryRow(ctx, query).Scan(&val)
 		check(err)
