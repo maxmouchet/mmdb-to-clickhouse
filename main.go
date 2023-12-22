@@ -8,6 +8,7 @@ import (
 	"github.com/oschwald/maxminddb-golang"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,7 @@ func main() {
 	mmdb := flag.String("mmdb", "example.mmdb", "MMDB file path")
 	name := flag.String("name", "example_mmdb", "Table name")
 	partition := flag.String("partition", time.Now().Format("2006-01-02"), "Partition date")
+	allowedColumns := flag.String("fields", "", "Comma-separated list of columns to import (all by default)")
 	batchSize := flag.Int("batch", 1_000_000, "Number of rows to insert at once")
 	drop := flag.Bool("drop", false, "Drop previous tables if they exist. Regardless of this flag, the current partition is always dropped to ensure idempotence.")
 	reload := flag.Bool("reload", false, "Reload the dictionary to ensure the new data is used right after insertion")
@@ -54,7 +56,7 @@ func main() {
 	err = db.Decode(0, &record)
 	check(err)
 
-	schema := InferSchema(record)
+	schema := InferSchema(record, strings.Split(*allowedColumns, ","))
 	schemaStr := SchemaToString(schema)
 	log.Printf("Schema: %s", schemaStr)
 
@@ -101,6 +103,7 @@ func main() {
 	err = conn.Exec(ctx, query, tableValue, partitionValue)
 	check(err)
 
+	log.Printf("Inserting data")
 	networks := db.Networks(maxminddb.SkipAliasedNetworks)
 	query = fmt.Sprintf("INSERT INTO %s", tableName)
 

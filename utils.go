@@ -49,11 +49,14 @@ func FlattenRecordRecursive(m map[string]interface{}, parent string) []Pair {
 	return pairs
 }
 
-func InferSchema(m map[string]interface{}) []Column {
+func InferSchema(m map[string]interface{}, allowedColumns []string) []Column {
 	schema := []Column{{"network", "String"}}
 	records := FlattenRecordRecursive(m, "")
 
 	for _, record := range records {
+		if allowedColumns[0] != "" && !slices.Contains(allowedColumns, record.Key) {
+			continue
+		}
 		switch record.Value.(type) {
 		case bool:
 			schema = append(schema, Column{record.Key, "Boolean"})
