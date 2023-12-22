@@ -33,8 +33,8 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	tableName := fmt.Sprintf("%s_history", *name)
 	dictName := *name
+	tableName := fmt.Sprintf("%s_history", *name)
 
 	ttlValue := clickhouse.Named("ttl", strconv.Itoa(*ttl))
 	dictValue := clickhouse.Named("dict", dictName)
@@ -43,6 +43,11 @@ func main() {
 
 	options, err := clickhouse.ParseDSN(*dsn)
 	check(err)
+
+	qualifiedTableName := fmt.Sprintf("`%s`", tableName)
+	if options.Auth.Database != "" {
+		qualifiedTableName = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, tableName)
+	}
 
 	conn, err := clickhouse.Open(options)
 	check(err)
@@ -87,14 +92,12 @@ func main() {
 	query = fmt.Sprintf(`
 		CREATE DICTIONARY IF NOT EXISTS {dict:Identifier} (%s)
 		PRIMARY KEY network
-		SOURCE(CLICKHOUSE(QUERY '
-			SELECT *
-			FROM %s
-			WHERE partition = (SELECT MAX(partition) FROM %s)
-		'))
+		SOURCE(CLICKHOUSE(
+			QUERY 'SELECT * FROM %s WHERE partition = (SELECT MAX(partition) FROM %s)'
+		))
 		LIFETIME(MIN 0 MAX 3600)
 		LAYOUT(IP_TRIE)
-	`, schemaStr, tableName, tableName)
+	`, schemaStr, qualifiedTableName, qualifiedTableName)
 	err = conn.Exec(ctx, query, dictValue)
 	check(err)
 
