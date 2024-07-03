@@ -53,18 +53,31 @@ And run `mmdb-to-clickhouse`:
 The output should look like the following:
 
 ```
-2023/12/21 12:18:10 Schema: network String, country String, partition Date
-2023/12/21 12:18:10 Creating example_mmdb_history
-2023/12/21 12:18:10 Creating example_mmdb
-2023/12/21 12:18:10 Dropping partition 2023-12-21
-2023/12/21 12:18:10 Inserted 1 rows
-2023/12/21 12:18:10 Running test query: SELECT dictGet('example_mmdb', 'country', IPv6StringToNum('1.1.1.1'))
-2023/12/21 12:18:10 Test query result: WW
+2024/07/04 13:51:07 Net schema: `network` String, `pointer` UInt64, `partition` Date
+2024/07/04 13:51:07 Val schema: `pointer` UInt32, `country` String, `partition` Date
+2024/07/04 13:51:07 Creating table example_mmdb_net_history
+2024/07/04 13:51:07 Creating table example_mmdb_val_history
+2024/07/04 13:51:07 Creating dictionary example_mmdb_net
+2024/07/04 13:51:07 Creating dictionary example_mmdb_val
+2024/07/04 13:51:07 Dropping partition 2024-07-04
+2024/07/04 13:51:07 Dropping partition 2024-07-04
+2024/07/04 13:51:07 Inserting data
+2024/07/04 13:51:07 Inserted 1 networks and 1 values
+2024/07/04 13:51:07 Creating function example_mmdb
+2024/07/04 13:51:07 Running test query: SELECT example_mmdb('1.1.1.1', 'country')
+2024/07/04 13:51:07 This may take some time as the dictionnary gets loaded in memory
+2024/07/04 13:51:07 Test query result: WW
 ```
 
-This will create two tables:
-- `example_mmdb_history`: a [partitioned](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/custom-partitioning-key) table which keeps the last 30 days of history by default (see the `-ttl` option)
-- `example_mmdb`: an in-memory IP trie [dictionary](https://clickhouse.com/docs/en/sql-reference/dictionaries) which always uses the latest partition from `example_mmdb_history`. This dictionary enables very fast IP lookups.
+This will create:
+- Two [partitioned](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/custom-partitioning-key) tables (30 days of history by default, see the `-ttl` option):
+  - `example_mmdb_net_history`: IP networks and pointers to distinct values
+  - `example_mmdb_val_history`: pointers and associated values
+- Two [dictionaries](https://clickhouse.com/docs/en/sql-reference/dictionaries):
+  - `example_mmdb_net`: an in-memory IP trie which always uses the latest partition from `example_mmdb_net_history`. This dictionary enables very fast IP lookups.
+  - `example_mmdb_val`: an in-memory KV mapping which always uses the latest partition from `example_mmdb_val_history`.
+- One [function](https://clickhouse.com/docs/en/sql-reference/statements/create/function):
+  - `example_mmdb(ip, attrs)`: this function first looks up the pointer in `example_mmdb_net` and then retrieves the value in `example_mmdb_val`.
 
 Open a REPL and inspect the tables:
 ```bash
@@ -73,22 +86,24 @@ docker exec -it clickhouse clickhouse client
 
 ```sql
 SHOW TABLES
--- ┌─name─────────────────┐
--- │ example_mmdb         │
--- │ example_mmdb_history │
--- └──────────────────────┘
+-- ┌─name─────────────────────┐
+-- │ example_mmdb_net         │
+-- │ example_mmdb_net_history │
+-- │ example_mmdb_val         │
+-- │ example_mmdb_val_history │
+-- └──────────────────────────┘
 
-SELECT * FROM example_mmdb_history
--- ┌─network───┬─country─┬──partition─┐
--- │ 0.0.0.0/0 │ WW      │ 2023-12-21 │
+SELECT * FROM example_mmdb_net
+-- ┌─network───┬─pointer─┬──partition─┐
+-- │ 0.0.0.0/0 │       0 │ 2024-07-04 │
 -- └───────────┴─────────┴────────────┘
 
-SELECT * FROM example_mmdb
--- ┌─network───┬─country─┬──partition─┐
--- │ 0.0.0.0/0 │ WW      │ 2023-12-21 │
--- └───────────┴─────────┴────────────┘
+SELECT * FROM example_mmdb_val
+-- ┌─pointer─┬─country─┬──partition─┐
+-- │       0 │ WW      │ 2024-07-04 │
+-- └─────────┴─────────┴────────────┘
 
-SELECT dictGet('example_mmdb', 'country', IPv6StringToNum('1.1.1.1')) AS country
+SELECT example_mmdb('1.1.1.1', 'country') AS country
 -- ┌─country─┐
 -- │ WW      │
 -- └─────────┘
