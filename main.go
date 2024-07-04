@@ -4,12 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/oschwald/maxminddb-golang"
 	"log"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/oschwald/maxminddb-golang"
 )
 
 func check(err error) {
@@ -21,7 +21,7 @@ func check(err error) {
 func main() {
 	dsn := flag.String("dsn", "clickhouse://localhost:9000", "ClickHouse URL")
 	mmdb := flag.String("mmdb", "example.mmdb", "MMDB file path")
-	name := flag.String("name", "example_mmdb", "Table name")
+	name := flag.String("name", "example_mmdb", "UDF name")
 	partition := flag.String("partition", time.Now().Format("2006-01-02"), "Partition date")
 	batchSize := flag.Int("batch", 1_000_000, "Number of rows to insert at once")
 	allowedColumns := flag.String("columns", "", "Comma-separated list of columns to import (all by default)")
@@ -33,20 +33,19 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	dictName := *name
-	tableName := fmt.Sprintf("%s_history", *name)
-
-	ttlValue := clickhouse.Named("ttl", strconv.Itoa(*ttl))
-	dictValue := clickhouse.Named("dict", dictName)
-	tableValue := clickhouse.Named("table", tableName)
-	partitionValue := clickhouse.Named("partition", *partition)
+	netDict := fmt.Sprintf("%s_net", *name)
+	valDict := fmt.Sprintf("%s_val", *name)
+	netTable := fmt.Sprintf("%s_net_history", *name)
+	valTable := fmt.Sprintf("%s_val_history", *name)
 
 	options, err := clickhouse.ParseDSN(*dsn)
 	check(err)
 
-	qualifiedTableName := fmt.Sprintf("`%s`", tableName)
+	qualifiedNetTable := fmt.Sprintf("`%s`", netTable)
+	qualifiedValTable := fmt.Sprintf("`%s`", valTable)
 	if options.Auth.Database != "" {
-		qualifiedTableName = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, tableName)
+		qualifiedNetTable = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, netTable)
+		qualifiedValTable = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, valTable)
 	}
 
 	conn, err := clickhouse.Open(options)
@@ -61,98 +60,92 @@ func main() {
 	err = db.Decode(0, &record)
 	check(err)
 
-	schema := InferSchema(record, strings.Split(*allowedColumns, ","))
-	schemaStr := SchemaToString(schema)
-	log.Printf("Schema: %s", schemaStr)
+	netSchemaStr := "`network` String, `pointer` UInt64, `partition` Date"
+	log.Printf("Net schema: %s", netSchemaStr)
+
+	valSchema := inferSchema(record, strings.Split(*allowedColumns, ","))
+	valSchemaStr := schemaToString(valSchema)
+	log.Printf("Val schema: %s", valSchemaStr)
 
 	if *drop {
-		log.Printf("Dropping %s", tableName)
-		query := "DROP TABLE IF EXISTS {table:Identifier}"
-		err = conn.Exec(ctx, query, tableValue)
-		check(err)
-
-		log.Printf("Dropping %s", dictName)
-		query = "DROP DICTIONARY IF EXISTS {dict:Identifier}"
-		err = conn.Exec(ctx, query, dictValue)
-		check(err)
+		check(dropFunction(ctx, conn, *name))
+		check(dropDict(ctx, conn, netDict))
+		check(dropDict(ctx, conn, valDict))
+		check(dropTable(ctx, conn, netTable))
+		check(dropTable(ctx, conn, valTable))
 	}
 
-	log.Printf("Creating %s", tableName)
-	query := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS {table:Identifier} (%s)
-		ENGINE MergeTree
-		ORDER BY network
-		PARTITION BY partition
-		TTL partition + INTERVAL {ttl:Int64} DAY
-	`, schemaStr)
-	err = conn.Exec(ctx, query, tableValue, ttlValue)
-	check(err)
+	check(createPartitionedTable(ctx, conn, netTable, netSchemaStr, "network", *ttl))
+	check(createPartitionedTable(ctx, conn, valTable, valSchemaStr, "pointer", *ttl))
 
-	log.Printf("Creating %s", dictName)
-	query = fmt.Sprintf(`
-		CREATE DICTIONARY IF NOT EXISTS {dict:Identifier} (%s)
-		PRIMARY KEY network
-		SOURCE(CLICKHOUSE(
-			QUERY 'SELECT * FROM %s WHERE partition = (SELECT MAX(partition) FROM %s)'
-		))
-		LIFETIME(MIN 0 MAX 3600)
-		LAYOUT(IP_TRIE)
-	`, schemaStr, qualifiedTableName, qualifiedTableName)
-	err = conn.Exec(ctx, query, dictValue)
-	check(err)
+	check(createDict(ctx, conn, netDict, netSchemaStr, qualifiedNetTable, "network", "IP_TRIE"))
+	check(createDict(ctx, conn, valDict, valSchemaStr, qualifiedValTable, "pointer", "FLAT"))
 
-	log.Printf("Dropping partition %s", *partition)
-	query = "ALTER TABLE {table:Identifier} DROP PARTITION {partition:String}"
-	err = conn.Exec(ctx, query, tableValue, partitionValue)
-	check(err)
+	check(dropPartition(ctx, conn, netTable, *partition))
+	check(dropPartition(ctx, conn, valTable, *partition))
 
 	log.Printf("Inserting data")
 	networks := db.Networks(maxminddb.SkipAliasedNetworks)
-	query = fmt.Sprintf("INSERT INTO %s", tableName)
 
-	i := 0
-	batch, err := conn.PrepareBatch(ctx, query)
+	netBatch, err := prepareBatch(ctx, conn, netTable)
 	check(err)
+	valBatch, err := prepareBatch(ctx, conn, valTable)
+	check(err)
+
+	netCount := 0
+	valCount := 0
+	offsetToPointer := make(map[uintptr]int)
 
 	for networks.Next() {
 		network, err := networks.Network(&record)
 		check(err)
 
-		flattened := FlattenRecord(record)
-		vals := []interface{}{network}
-		for _, column := range schema {
-			if column.Name != "network" && column.Name != "partition" {
-				vals = append(vals, flattened[column.Name])
-			}
-		}
-		vals = append(vals, partition)
-
-		err = batch.Append(vals...)
+		offset, err := db.LookupOffset(network.IP)
 		check(err)
 
-		i += 1
-		if i%*batchSize == 0 {
-			err = batch.Send()
+		if _, ok := offsetToPointer[offset]; !ok {
+			pointer := valCount + 1 // Reserve index 0 for unknown values
+			offsetToPointer[offset] = pointer
+			flattened := flattenRecord(record)
+			val := []interface{}{pointer}
+			for _, column := range valSchema {
+				if column.Name != "pointer" && column.Name != "partition" {
+					val = append(val, flattened[column.Name])
+				}
+			}
+			val = append(val, partition)
+			check(valBatch.Append(val...))
+			valCount += 1
+		}
+
+		err = netBatch.Append(network, offsetToPointer[offset], partition)
+		check(err)
+
+		netCount += 1
+		if netCount%*batchSize == 0 {
+			check(netBatch.Send())
+			check(valBatch.Send())
+			netBatch, err = prepareBatch(ctx, conn, netTable)
 			check(err)
-			batch, err = conn.PrepareBatch(ctx, query)
+			valBatch, err = prepareBatch(ctx, conn, valTable)
 			check(err)
-			log.Printf("Inserted %d rows", i)
+			log.Printf("Inserted %d networks and %d values", netCount, valCount)
 		}
 	}
 
-	err = batch.Send()
-	check(err)
-	log.Printf("Inserted %d rows", i)
+	check(netBatch.Send())
+	check(valBatch.Send())
+	log.Printf("Inserted %d networks and %d values", netCount, valCount)
+
+	createFunction(ctx, conn, *name, "ip, attrs", "dictGet('example_mmdb_val', attrs, dictGet('example_mmdb_net', 'pointer', toIPv6(ip)))")
 
 	if *reload {
-		log.Printf("Reloading %s", dictName)
-		query = "SYSTEM RELOAD DICTIONARY {dict:Identifier}"
-		err = conn.Exec(ctx, query, dictValue)
-		check(err)
+		check(reloadDict(ctx, conn, netDict))
+		check(reloadDict(ctx, conn, valDict))
 	}
 
 	if *test {
-		query = fmt.Sprintf("SELECT dictGet('%s', '%s', IPv6StringToNum('1.1.1.1'))", dictName, schema[1].Name)
+		query := fmt.Sprintf("SELECT %s('1.1.1.1', '%s')", *name, valSchema[1].Name)
 		log.Printf("Running test query: %s", query)
 		log.Printf("This may take some time as the dictionnary gets loaded in memory")
 		var val string
