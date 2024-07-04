@@ -18,17 +18,24 @@ func createDict(
 	source string,
 	primaryKey string,
 	layout string,
+	user string,
+	password string,
 ) error {
 	log.Printf("Creating dictionary %s", name)
+	if user == "" {
+		user = "default"
+	}
 	query := fmt.Sprintf(`
 		CREATE DICTIONARY IF NOT EXISTS %s (%s)
 		PRIMARY KEY %s
 		SOURCE(CLICKHOUSE(
 			QUERY 'SELECT * FROM %s WHERE partition = (SELECT MAX(partition) FROM %s)'
+			USER '%s'
+			PASSWORD '%s'
 		))
 		LIFETIME(MIN 0 MAX 3600)
 		LAYOUT(%s)
-	`, name, schema, primaryKey, source, source, layout)
+	`, name, schema, primaryKey, source, source, user, password, layout)
 	// TODO: Use named parameters wherever possible
 	return conn.Exec(ctx, query)
 }

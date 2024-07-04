@@ -41,9 +41,13 @@ func main() {
 	options, err := clickhouse.ParseDSN(*dsn)
 	check(err)
 
+	qualifiedNetDict := fmt.Sprintf("%s", netDict)
+	qualifiedValDict := fmt.Sprintf("%s", valDict)
 	qualifiedNetTable := fmt.Sprintf("`%s`", netTable)
 	qualifiedValTable := fmt.Sprintf("`%s`", valTable)
 	if options.Auth.Database != "" {
+		qualifiedNetDict = fmt.Sprintf("%s.%s", options.Auth.Database, netDict)
+		qualifiedValDict = fmt.Sprintf("%s.%s", options.Auth.Database, valDict)
 		qualifiedNetTable = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, netTable)
 		qualifiedValTable = fmt.Sprintf("`%s`.`%s`", options.Auth.Database, valTable)
 	}
@@ -78,8 +82,8 @@ func main() {
 	check(createPartitionedTable(ctx, conn, netTable, netSchemaStr, "network", *ttl))
 	check(createPartitionedTable(ctx, conn, valTable, valSchemaStr, "pointer", *ttl))
 
-	check(createDict(ctx, conn, netDict, netSchemaStr, qualifiedNetTable, "network", "IP_TRIE"))
-	check(createDict(ctx, conn, valDict, valSchemaStr, qualifiedValTable, "pointer", "FLAT"))
+	check(createDict(ctx, conn, netDict, netSchemaStr, qualifiedNetTable, "network", "IP_TRIE", options.Auth.Username, options.Auth.Password))
+	check(createDict(ctx, conn, valDict, valSchemaStr, qualifiedValTable, "pointer", "FLAT", options.Auth.Username, options.Auth.Password))
 
 	check(dropPartition(ctx, conn, netTable, *partition))
 	check(dropPartition(ctx, conn, valTable, *partition))
@@ -137,7 +141,11 @@ func main() {
 	check(valBatch.Send())
 	log.Printf("Inserted %d networks and %d values", netCount, valCount)
 
-	createFunction(ctx, conn, *name, "ip, attrs", "dictGet('example_mmdb_val', attrs, dictGet('example_mmdb_net', 'pointer', toIPv6(ip)))")
+	createFunction(ctx, conn, *name, "ip, attrs", fmt.Sprintf(
+		"dictGet('%s', attrs, dictGet('%s', 'pointer', toIPv6(ip)))",
+		qualifiedValDict,
+		qualifiedNetDict,
+	))
 
 	if *reload {
 		check(reloadDict(ctx, conn, netDict))
