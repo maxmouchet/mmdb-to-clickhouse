@@ -18,7 +18,9 @@ To get real data, check out the free [Country & ASN database](https://ipinfo.io/
 ## Current limitations
 
 - The schema is inferred from the first record only. If subsequent records have additional fields, those will be ignored.
-- The `network` and `partition` names are reserved and must not be present in the MMDB file
+- The `network` and `partition` names are reserved and must not be present in the MMDB file.
+- The username and password will be embedded in the dictionary source definition (see https://github.com/ClickHouse/ClickHouse/issues/38991).
+  - To avoid storing critical credentials in the dictionary definition, you can create a dedicated user that has only access to the MMDB tables.
 
 ## Installation
 
