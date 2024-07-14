@@ -51,6 +51,8 @@ And run `mmdb-to-clickhouse`:
 ./mmdb-to-clickhouse -dsn clickhouse://localhost:9000 -mmdb example.mmdb -name example_mmdb -test
 ```
 
+(See [clickhouse-go](https://github.com/ClickHouse/clickhouse-go?tab=readme-ov-file#dsn) documentation for the DSN format and allowed values)
+
 The output should look like the following:
 
 ```
@@ -123,3 +125,12 @@ DROP DICTIONARY example_mmdb_val;
 DROP TABLE example_mmdb_net_history;
 DROP TABLE example_mmdb_val_history;
 ```
+
+## Performance
+
+Tests performed with ClickHouse 24.6.1 and mmdb-to-clickhouse 1.2.1 on a VM with 4 vCPUs (i5-12600H) and 32GB of memory.
+
+Database | MMDB size | Networks | Values | Insertion time | Dict cold load time | Dict mem usage | Lookup
+---------|-----------|----------|--------|----------------|---------------------|----------------|-------
+[IPinfo Privacy](https://ipinfo.io/products/anonymous-ip-database)     | 293MB | 12M  | 387  | 30 seconds | 30 seconds | 558MB | 40M rows/s
+[IPinfo Location](https://ipinfo.io/products/ip-geolocation-database)  | 1.6GB | 205M | 358k | 9 minutes  | 8 minutes  | 9GB   | 40M rows/s
