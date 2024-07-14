@@ -36,7 +36,6 @@ docker run --rm -it ghcr.io/maxmouchet/mmdb-to-clickhouse -h
 
 ## Example usage
 
-
 First start a ClickHouse instance:
 ```bash
 docker run --name clickhouse --rm -d -p 9000:9000 clickhouse/clickhouse-server
@@ -114,4 +113,13 @@ SELECT example_mmdb('1.1.1.1', 'country') AS country
 To clean up just remove the ClickHouse instance:
 ```bash
 docker rm -f clickhouse
+```
+
+Or, to cleanup tables manually:
+```sql
+DROP FUNCTION example_mmdb;
+DROP DICTIONARY example_mmdb_net;
+DROP DICTIONARY example_mmdb_val;
+DROP TABLE example_mmdb_net_history;
+DROP TABLE example_mmdb_val_history;
 ```
